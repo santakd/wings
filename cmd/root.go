@@ -2,8 +2,15 @@ package cmd
 
 import (
 	"crypto/tls"
-	"emperror.dev/errors"
 	"fmt"
+	"net/http"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"emperror.dev/errors"
 	"github.com/NYTimes/logrotate"
 	"github.com/apex/log"
 	"github.com/apex/log/handlers/multi"
@@ -14,6 +21,7 @@ import (
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
 	"github.com/pterodactyl/wings/loggers/cli"
+	"github.com/pterodactyl/wings/panelapi"
 	"github.com/pterodactyl/wings/router"
 	"github.com/pterodactyl/wings/server"
 	"github.com/pterodactyl/wings/sftp"
@@ -21,11 +29,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
-	"net/http"
-	"os"
-	"path"
-	"path/filepath"
-	"strings"
 )
 
 var (
@@ -180,7 +183,17 @@ func rootCmdRun(*cobra.Command, []string) {
 		}).Info("configured system user successfully")
 	}
 
-	if err := server.LoadDirectory(); err != nil {
+	panelClient := panelapi.CreateClient(
+		config.Get().PanelLocation,
+		config.Get().AuthenticationTokenId,
+		config.Get().AuthenticationToken,
+		panelapi.WithTimeout(time.Second*time.Duration(config.Get().RemoteQuery.Timeout)),
+	)
+	_ = panelClient
+
+	serverManager := server.NewManager(panelClient)
+
+	if err := serverManager.Initialize(int(c.RemoteQuery.BootServersPerPage)); err != nil {
 		log.WithField("error", err).Fatal("failed to load server configurations")
 		return
 	}
@@ -195,7 +208,7 @@ func rootCmdRun(*cobra.Command, []string) {
 	}
 
 	// Just for some nice log output.
-	for _, s := range server.GetServers().All() {
+	for _, s := range serverManager.GetAll() {
 		log.WithField("server", s.Id()).Info("loaded configuration for server")
 	}
 
@@ -209,7 +222,7 @@ func rootCmdRun(*cobra.Command, []string) {
 	// and reboot processes without causing a slow-down due to sequential booting.
 	pool := workerpool.New(4)
 
-	for _, serv := range server.GetServers().All() {
+	for _, serv := range serverManager.GetAll() {
 		s := serv
 
 		pool.Submit(func() {
@@ -288,7 +301,7 @@ func rootCmdRun(*cobra.Command, []string) {
 	}).Info("configuring internal webserver")
 
 	// Configure the router.
-	r := router.Configure()
+	r := router.Configure(serverManager)
 
 	s := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", c.Api.Host, c.Api.Port),
@@ -359,7 +372,7 @@ func rootCmdRun(*cobra.Command, []string) {
 
 	// Cancel the context on all of the running servers at this point, even though the
 	// program is just shutting down.
-	for _, s := range server.GetServers().All() {
+	for _, s := range serverManager.GetAll() {
 		s.CtxCancel()
 	}
 }

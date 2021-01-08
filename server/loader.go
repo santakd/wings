@@ -1,39 +1,36 @@
 package server
 
 import (
-	"emperror.dev/errors"
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"time"
+
+	"emperror.dev/errors"
 	"github.com/apex/log"
 	"github.com/gammazero/workerpool"
 	"github.com/pterodactyl/wings/api"
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
 	"github.com/pterodactyl/wings/environment/docker"
+	"github.com/pterodactyl/wings/panelapi"
 	"github.com/pterodactyl/wings/server/filesystem"
-	"os"
-	"path/filepath"
-	"runtime"
-	"time"
 )
-
-var servers = NewCollection(nil)
-
-func GetServers() *Collection {
-	return servers
-}
 
 // Iterates over a given directory and loads all of the servers listed before returning
 // them to the calling function.
-func LoadDirectory() error {
-	if len(servers.items) != 0 {
+func (m *manager) Initialize(serversPerPage int) error {
+	if len(m.servers.items) != 0 {
 		return errors.New("cannot call LoadDirectory with a non-nil collection")
 	}
 
 	log.Info("fetching list of servers from API")
-	configs, err := api.New().GetServers()
+	assignedServers, err := m.panelClient.GetServers(context.TODO(), serversPerPage)
 	if err != nil {
-		if !api.IsRequestError(err) {
+		if !panelapi.IsRequestError(err) {
 			return err
 		}
 
@@ -41,13 +38,11 @@ func LoadDirectory() error {
 	}
 
 	start := time.Now()
-	log.WithField("total_configs", len(configs)).Info("processing servers returned by the API")
+	log.WithField("total_configs", len(assignedServers)).Info("processing servers returned by the API")
 
 	pool := workerpool.New(runtime.NumCPU())
 	log.Debugf("using %d workerpools to instantiate server instances", runtime.NumCPU())
-	for _, data := range configs {
-		data := data
-
+	for _, data := range assignedServers {
 		pool.Submit(func() {
 			// Parse the json.RawMessage into an expected struct value. We do this here so that a single broken
 			// server does not cause the entire boot process to hang, and allows us to show more useful error
@@ -68,7 +63,7 @@ func LoadDirectory() error {
 				return
 			}
 
-			servers.Add(s)
+			m.Add(s)
 		})
 	}
 

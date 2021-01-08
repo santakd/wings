@@ -6,18 +6,19 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"github.com/apex/log"
-	"github.com/patrickmn/go-cache"
-	"github.com/pkg/sftp"
-	"github.com/pterodactyl/wings/api"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"io/ioutil"
 	"net"
 	"os"
 	"path"
 	"strings"
-	"time"
+
+	"github.com/apex/log"
+	"github.com/patrickmn/go-cache"
+	"github.com/pkg/sftp"
+	"github.com/pterodactyl/wings/api"
+	"github.com/pterodactyl/wings/server"
+	"golang.org/x/crypto/ssh"
 )
 
 type Settings struct {
@@ -38,6 +39,8 @@ type Server struct {
 	Settings Settings
 	User     User
 
+	serverManager server.Manager
+
 	PathValidator      func(fs FileSystem, p string) (string, error)
 	DiskSpaceValidator func(fs FileSystem) bool
 
@@ -45,13 +48,6 @@ type Server struct {
 	// check against whatever system is desired to confirm if the given username and password
 	// combination is valid. If so, should return an authentication response.
 	CredentialValidator func(r api.SftpAuthRequest) (*api.SftpAuthResponse, error)
-}
-
-// Create a new server configuration instance.
-func New(c *Server) error {
-	c.cache = cache.New(5*time.Minute, 10*time.Minute)
-
-	return nil
 }
 
 // Initialize the SFTP server and add a persistent listener to handle inbound SFTP connections.

@@ -3,10 +3,19 @@ package router
 import (
 	"bufio"
 	"crypto/sha256"
-	"emperror.dev/errors"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"emperror.dev/errors"
 	"github.com/apex/log"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -19,14 +28,6 @@ import (
 	"github.com/pterodactyl/wings/router/tokens"
 	"github.com/pterodactyl/wings/server"
 	"github.com/pterodactyl/wings/system"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"sync/atomic"
-	"time"
 )
 
 // Number of ticks in the progress bar
@@ -322,19 +323,19 @@ func postTransfer(c *gin.Context) {
 			i.Server().Events().Publish(server.TransferLogsEvent, output)
 		}
 
+		serverManager := ServerManagerFromContext(c)
+
 		// Mark the server as transferring to prevent problems later on during the process and
 		// then push the server into the global server collection for this instance.
 		i.Server().SetTransferring(true)
-		server.GetServers().Add(i.Server())
+		serverManager.Add(i.Server())
 		defer func(s *server.Server) {
 			// In the event that this transfer call fails, remove the server from the global
 			// server tracking so that we don't have a dangling instance.
 			if err := data.sendTransferStatus(!hasError); hasError || err != nil {
 				sendTransferLog("Server transfer failed, check Wings logs for additional information.")
 				s.Events().Publish(server.TransferStatusEvent, "failure")
-				server.GetServers().Remove(func(s2 *server.Server) bool {
-					return s.Id() == s2.Id()
-				})
+				serverManager.Remove(s)
 
 				// If the transfer status was successful but the request failed, act like the transfer failed.
 				if !hasError && err != nil {
