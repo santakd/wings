@@ -1,19 +1,61 @@
 package system
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"emperror.dev/errors"
+	"github.com/mholt/archiver/v3"
 )
 
 var cr = []byte(" \r")
 var crr = []byte("\r\n")
+
+// FirstNotEmpty returns the first string passed in that is not an empty value.
+func FirstNotEmpty(v ...string) string {
+	for _, val := range v {
+		if val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+func MustInt(v string) int {
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		panic(errors.Wrap(err, "system/utils: could not parse int"))
+	}
+	return i
+}
+
+// ExtractArchiveSourceName looks for the provided archiver.File's name if it is
+// a type that is supported, otherwise it returns an error to the caller.
+func ExtractArchiveSourceName(f archiver.File, dir string) (name string, err error) {
+	switch s := f.Sys().(type) {
+	case *tar.Header:
+		name = s.Name
+	case *gzip.Header:
+		name = s.Name
+	case *zip.FileHeader:
+		name = s.Name
+	default:
+		err = errors.New(fmt.Sprintf("could not parse underlying data source with type: %s", reflect.TypeOf(s).String()))
+	}
+	return name, err
+}
 
 func ScanReader(r io.Reader, callback func(line string)) error {
 	br := bufio.NewReader(r)

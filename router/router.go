@@ -3,15 +3,18 @@ package router
 import (
 	"github.com/apex/log"
 	"github.com/gin-gonic/gin"
+	"github.com/pterodactyl/wings/router/middleware"
+	"github.com/pterodactyl/wings/server"
 )
 
-// Configures the routing infrastructure for this daemon instance.
-func Configure() *gin.Engine {
+// Configure configures the routing infrastructure for this daemon instance.
+func Configure(m *server.Manager) *gin.Engine {
 	gin.SetMode("release")
 
-	m := Middleware{}
 	router := gin.New()
-	router.Use(gin.Recovery(), m.ErrorHandler(), m.SetAccessControlHeaders())
+	router.Use(gin.Recovery())
+	router.Use(middleware.AttachRequestID(), middleware.CaptureErrors(), middleware.SetAccessControlHeaders())
+	router.Use(middleware.AttachServerManager(m))
 	// @todo log this into a different file so you can setup IP blocking for abusive requests and such.
 	// This should still dump requests in debug mode since it does help with understanding the request
 	// lifecycle and quickly seeing what was called leading to the logs. However, it isn't feasible to mix
@@ -19,17 +22,14 @@ func Configure() *gin.Engine {
 	// spamfest.
 	router.Use(gin.LoggerWithFormatter(func(params gin.LogFormatterParams) string {
 		log.WithFields(log.Fields{
-			"client_ip": params.ClientIP,
-			"status":    params.StatusCode,
-			"latency":   params.Latency,
+			"client_ip":  params.ClientIP,
+			"status":     params.StatusCode,
+			"latency":    params.Latency,
+			"request_id": params.Keys["request_id"],
 		}).Debugf("%s %s", params.MethodColor()+params.Method+params.ResetColor(), params.Path)
 
 		return ""
 	}))
-
-	router.OPTIONS("/api/system", func(c *gin.Context) {
-		c.Status(200)
-	})
 
 	// These routes use signed URLs to validate access to the resource being requested.
 	router.GET("/download/backup", getDownloadBackup)
@@ -39,16 +39,16 @@ func Configure() *gin.Engine {
 	// This route is special it sits above all of the other requests because we are
 	// using a JWT to authorize access to it, therefore it needs to be publicly
 	// accessible.
-	router.GET("/api/servers/:server/ws", m.ServerExists(), getServerWebsocket)
+	router.GET("/api/servers/:server/ws", middleware.ServerExists(), getServerWebsocket)
 
 	// This request is called by another daemon when a server is going to be transferred out.
 	// This request does not need the AuthorizationMiddleware as the panel should never call it
 	// and requests are authenticated through a JWT the panel issues to the other daemon.
-	router.GET("/api/servers/:server/archive", m.ServerExists(), getServerArchive)
+	router.GET("/api/servers/:server/archive", middleware.ServerExists(), getServerArchive)
 
 	// All of the routes beyond this mount will use an authorization middleware
 	// and will not be accessible without the correct Authorization header provided.
-	protected := router.Use(m.RequireAuthorization())
+	protected := router.Use(middleware.RequireAuthorization())
 	protected.POST("/api/update", postUpdateConfiguration)
 	protected.GET("/api/system", getSystemInformation)
 	protected.GET("/api/servers", getAllServers)
@@ -58,7 +58,7 @@ func Configure() *gin.Engine {
 	// These are server specific routes, and require that the request be authorized, and
 	// that the server exist on the Daemon.
 	server := router.Group("/api/servers/:server")
-	server.Use(m.RequireAuthorization(), m.ServerExists())
+	server.Use(middleware.RequireAuthorization(), middleware.ServerExists())
 	{
 		server.GET("", getServer)
 		server.PATCH("", patchServer)
@@ -88,14 +88,15 @@ func Configure() *gin.Engine {
 			files.POST("/decompress", postServerDecompressFiles)
 			files.POST("/chmod", postServerChmodFile)
 
-			files.GET("/pull", getServerPullingFiles)
-			files.POST("/pull", postServerPullRemoteFile)
-			files.DELETE("/pull/:download", deleteServerPullRemoteFile)
+			files.GET("/pull", middleware.RemoteDownloadEnabled(), getServerPullingFiles)
+			files.POST("/pull", middleware.RemoteDownloadEnabled(), postServerPullRemoteFile)
+			files.DELETE("/pull/:download", middleware.RemoteDownloadEnabled(), deleteServerPullRemoteFile)
 		}
 
 		backup := server.Group("/backup")
 		{
 			backup.POST("", postServerBackup)
+			backup.POST("/:backup/restore", postServerRestoreBackup)
 			backup.DELETE("/:backup", deleteServerBackup)
 		}
 	}

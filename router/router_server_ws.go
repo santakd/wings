@@ -3,15 +3,18 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	ws "github.com/gorilla/websocket"
+	"github.com/pterodactyl/wings/router/middleware"
 	"github.com/pterodactyl/wings/router/websocket"
-	"time"
 )
 
 // Upgrades a connection to a websocket and passes events along between.
 func getServerWebsocket(c *gin.Context) {
-	s := GetServer(c.Param("server"))
+	manager := middleware.ExtractManager(c)
+	s, _ := manager.Get(c.Param("server"))
 	handler, err := websocket.GetHandler(s, c.Writer, c.Request)
 	if err != nil {
 		NewServerError(err, s).Abort(c)

@@ -2,15 +2,16 @@ package server
 
 import (
 	"crypto/sha256"
-	"emperror.dev/errors"
 	"encoding/hex"
-	"github.com/mholt/archiver/v3"
-	"github.com/pterodactyl/wings/config"
-	"github.com/pterodactyl/wings/server/filesystem"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+
+	"emperror.dev/errors"
+	"github.com/mholt/archiver/v3"
+	"github.com/pterodactyl/wings/config"
+	"github.com/pterodactyl/wings/server/filesystem"
 )
 
 // Archiver represents a Server Archiver.
@@ -45,7 +46,7 @@ func (a *Archiver) Stat() (*filesystem.Stat, error) {
 	}
 
 	return &filesystem.Stat{
-		Info:     s,
+		FileInfo: s,
 		Mimetype: "application/tar+gzip",
 	}, nil
 }

@@ -2,14 +2,15 @@ package server
 
 import (
 	"encoding/json"
+	"regexp"
+	"strconv"
+	"sync"
+
 	"github.com/apex/log"
 	"github.com/pterodactyl/wings/api"
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
 	"github.com/pterodactyl/wings/events"
-	"regexp"
-	"strconv"
-	"sync"
 )
 
 var dockerEvents = []string{
@@ -135,7 +136,7 @@ func (s *Server) StartEventListeners() {
 		}
 	}
 
-	s.Log().Info("registering event listeners: console, state, resources...")
+	s.Log().Debug("registering event listeners: console, state, resources...")
 	s.Environment.Events().On(environment.ConsoleOutputEvent, &console)
 	s.Environment.Events().On(environment.StateChangeEvent, &state)
 	s.Environment.Events().On(environment.ResourceEvent, &stats)
